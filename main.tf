@@ -17,7 +17,7 @@ terraform {
 # Generates a friendly name like "harmless-grouper". Think of it as a resource
 # whose only job is to produce a value.
 resource "random_pet" "name" {
-  length    = 2
+  length    = 3
   separator = "-"
 }
 
