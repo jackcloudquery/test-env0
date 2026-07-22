@@ -34,25 +34,36 @@ resource "null_resource" "greeting" {
   }
 }
 
-# --- Free-tier timeout test -------------------------------------------------
-# Forces the deployment to run longer than the Free plan's 20-minute cap so the
-# run is killed with a "Task Execution Timeout" (the cap), which is what the
-# free-tier upgrade hint keys on.
-#
-# Set this lower via an env0 environment variable (name: TF_VAR_hang_seconds)
-# if you temporarily shrank FREE_TIER_DEPLOYMENT_AGENT_TIMEOUT on the backend
-# for a faster test — e.g. TF_VAR_hang_seconds=60 against a 30s cap.
-variable "hang_seconds" {
-  description = "Seconds the apply should sleep. Must exceed the deployment timeout to trigger a TIMEOUT."
-  type        = number
-  default     = 1300 # ~21.7 min, just over the 20-minute (1200s) free-tier cap
+# Forces a real (non-skipped) apply on EVERY deployment: the timestamp() trigger
+# changes each run, so the resource is recreated and env0 never marks the run as a
+# skipped apply. This keeps each deploy fast (<1s) and successful while still
+# counting toward the monthly-runs cap (skipped applies don't count).
+resource "null_resource" "always_apply" {
+  triggers = {
+    run_at = timestamp()
+  }
+
+  provisioner "local-exec" {
+    command = "echo 'Applied at ${timestamp()}'"
+  }
 }
 
-# A do-nothing resource that just burns wall-clock time on apply. It prints a
-# line every 30s so the agent keeps heartbeating (< the 60s heartbeat window) —
-# that guarantees an *execution* timeout (Task Execution Timeout), not a
-# heartbeat timeout, which is the case the free-tier hint is meant to catch.
+# --- Optional free-tier timeout test ---------------------------------------
+# Disabled by default (hang_seconds = 0) so normal deploys finish in seconds and
+# succeed. To reproduce the Free plan's 20-minute Task Execution Timeout, set an
+# env0 environment variable TF_VAR_hang_seconds greater than the deployment cap
+# (e.g. 1300 against the 1200s free-tier cap, or 60 against a temporarily-shrunk
+# cap). It prints a line every 30s to keep the agent heartbeating, so it produces
+# an *execution* timeout, not a heartbeat timeout.
+variable "hang_seconds" {
+  description = "Seconds the apply should sleep. 0 (default) = fast, succeeding deploy. Set > the deployment cap to trigger a Task Execution Timeout."
+  type        = number
+  default     = 0
+}
+
 resource "null_resource" "hang" {
+  count = var.hang_seconds > 0 ? 1 : 0
+
   # timestamp() changes every plan, so the sleep re-runs on every deployment.
   triggers = {
     run_at = timestamp()
